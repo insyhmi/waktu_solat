@@ -1,13 +1,16 @@
 from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6.QtCore import QTimer, QTime, QDate
 import requests
 import datetime
 
 BASE_URL = "https://api.waktusolat.app/v2/solat/"
+ZONE = "JHR01"
 
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
         MainWindow.setObjectName("MainWindow")
         MainWindow.resize(955, 527)
+        MainWindow.setWindowTitle("Waktu Solat")
         self.centralwidget = QtWidgets.QWidget(parent=MainWindow)
         self.centralwidget.setObjectName("centralwidget")
         self.verticalLayout_3 = QtWidgets.QVBoxLayout(self.centralwidget)
@@ -20,14 +23,25 @@ class Ui_MainWindow(object):
         font = QtGui.QFont()
         font.setPointSize(12)
         self.label_tarikh.setFont(font)
+        self.label_tarikh.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.label_tarikh.setObjectName("label_tarikh")
         self.horizontalLayout_3.addWidget(self.label_tarikh)
+        self.layout_tarikh_masa = QtWidgets.QHBoxLayout()
+        self.layout_tarikh_masa.setObjectName("layout_tarikh_masa")
         self.tarikh = QtWidgets.QLabel(parent=self.centralwidget)
         font = QtGui.QFont()
-        font.setPointSize(12)
+        font.setPointSize(13)
         self.tarikh.setFont(font)
+        self.tarikh.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight|QtCore.Qt.AlignmentFlag.AlignTrailing|QtCore.Qt.AlignmentFlag.AlignVCenter)
         self.tarikh.setObjectName("tarikh")
-        self.horizontalLayout_3.addWidget(self.tarikh)
+        self.layout_tarikh_masa.addWidget(self.tarikh)
+        self.masa = QtWidgets.QLabel(parent=self.centralwidget)
+        font = QtGui.QFont()
+        font.setPointSize(13)
+        self.masa.setFont(font)
+        self.masa.setObjectName("masa")
+        self.layout_tarikh_masa.addWidget(self.masa)
+        self.horizontalLayout_3.addLayout(self.layout_tarikh_masa)
         self.verticalLayout.addLayout(self.horizontalLayout_3)
         self.horizontalLayout_2 = QtWidgets.QHBoxLayout()
         self.horizontalLayout_2.setObjectName("horizontalLayout_2")
@@ -35,6 +49,7 @@ class Ui_MainWindow(object):
         font = QtGui.QFont()
         font.setPointSize(12)
         self.label.setFont(font)
+        self.label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.label.setObjectName("label")
         self.horizontalLayout_2.addWidget(self.label)
         self.verticalLayout_2 = QtWidgets.QVBoxLayout()
@@ -168,20 +183,38 @@ class Ui_MainWindow(object):
         self.menubar = QtWidgets.QMenuBar(parent=MainWindow)
         self.menubar.setGeometry(QtCore.QRect(0, 0, 955, 26))
         self.menubar.setObjectName("menubar")
+        self.menuMenu = QtWidgets.QMenu(parent=self.menubar)
+        self.menuMenu.setObjectName("menuMenu")
         MainWindow.setMenuBar(self.menubar)
         self.statusbar = QtWidgets.QStatusBar(parent=MainWindow)
         self.statusbar.setObjectName("statusbar")
         MainWindow.setStatusBar(self.statusbar)
-
+        self.actionSettings = QtGui.QAction(parent=MainWindow)
+        self.actionSettings.setObjectName("actionSettings")
+        self.actionQuit = QtGui.QAction(parent=MainWindow)
+        self.actionQuit.setObjectName("actionQuit")
+        self.actionRefresh = QtGui.QAction(parent=MainWindow)
+        self.actionRefresh.setObjectName("actionRefresh")
+        self.menuMenu.addAction(self.actionRefresh)
+        self.menuMenu.addAction(self.actionSettings)
+        self.menuMenu.addAction(self.actionQuit)
+        self.menubar.addAction(self.menuMenu.menuAction())
         self.retranslateUi(MainWindow)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
-        self.get_waktu('SGR01')
+
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_time)
+        self.timer.start(1000) # Update every 1000 ms (1 second)
+        self.update_date()
+
+        self.get_waktu(ZONE)
 
     def retranslateUi(self, MainWindow):
         _translate = QtCore.QCoreApplication.translate
-        MainWindow.setWindowTitle(_translate("MainWindow", "MainWindow"))
+        MainWindow.setWindowTitle(_translate("MainWindow", "Waktu Solat"))
         self.label_tarikh.setText(_translate("MainWindow", "Tarikh Masa"))
-        self.tarikh.setText(_translate("MainWindow", "DD/MM/YYYY HH:MM:ss"))
+        self.tarikh.setText(_translate("MainWindow", "DD/MM/YYYY"))
+        self.masa.setText(_translate("MainWindow", "hh:mm:ss"))
         self.label.setText(_translate("MainWindow", "Waktu solat seterusnya:"))
         self.label_waktu_solat_next.setText(_translate("MainWindow", "waktu_solat"))
         self.time_waktu_solat_next.setText(_translate("MainWindow", "00:00"))
@@ -197,10 +230,28 @@ class Ui_MainWindow(object):
         self.time_maghrib.setText(_translate("MainWindow", "00:00"))
         self.label_isyak.setText(_translate("MainWindow", "Isyak"))
         self.time_isyak.setText(_translate("MainWindow", "00:00"))
+        self.menuMenu.setTitle(_translate("MainWindow", "Menu"))
+        self.actionSettings.setText(_translate("MainWindow", "Settings"))
+        self.actionQuit.setText(_translate("MainWindow", "Quit"))
+        self.actionRefresh.setText(_translate("MainWindow", "Refresh"))
+
+    def update_time(self):
+        current_time = QTime.currentTime()
+        formatted_time = current_time.toString("hh:mm:ss")
+        if formatted_time[:2] == '00' and formatted_time[-2:] == '00':
+            self.update_date()
+            print("Updating date")
+        self.masa.setText(formatted_time)
+
+    def update_date(self):
+        current_date = QDate.currentDate()
+        formatted_date = current_date.toString("dd/MM/yyyy")
+        self.tarikh.setText(formatted_date)
 
     def get_waktu(self, zone):
         today = datetime.datetime.today()
-        self.tarikh.setText(today.strftime("%d/%m/%Y %H:%M:%S"))
+        month = today.month
+        year = today.year
         response = requests.get(f'{BASE_URL}{zone}')
         if response.status_code != 200:
             return
@@ -212,7 +263,10 @@ class Ui_MainWindow(object):
         self.time_asar.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['asr']).strftime("%H:%M")))
         self.time_maghrib.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['maghrib']).strftime("%H:%M")))
         self.time_isyak.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['isha']).strftime("%H:%M")))
-        if int(today.timestamp()) < response_dict['prayers'][prayer_index]['syuruk']:
+        if int(today.timestamp()) < response_dict['prayers'][prayer_index]['fajr']:
+            self.label_waktu_solat_next.setText("Subuh")
+            self.time_waktu_solat_next.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['fajr']).strftime("%H:%M")))
+        elif int(today.timestamp()) < response_dict['prayers'][prayer_index]['syuruk']:
             self.label_waktu_solat_next.setText("Syuruk")
             self.time_waktu_solat_next.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['syuruk']).strftime("%H:%M")))
         elif int(today.timestamp()) < response_dict['prayers'][prayer_index]['dhuhr']:
@@ -228,9 +282,20 @@ class Ui_MainWindow(object):
             self.label_waktu_solat_next.setText("Isyak")
             self.time_waktu_solat_next.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['isha']).strftime("%H:%M")))
         else:
+            prayer_index += 1
+            if prayer_index == len(response_dict['prayers']):
+                prayer_index = 0
+                month += 1
+                if month == 13:
+                    month = 1
+                    year += 1
+                next_month_url = f"https://api.waktusolat.app/v2/solat/{zone}?year={year}&month={month}"
+                response = requests.get(next_month_url)
+                response_dict = response.json()
+            #print(prayer_index, month)
             self.label_waktu_solat_next.setText("Subuh")
-            self.time_waktu_solat_next.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['fajr']).strftime("%H:%M")))            
-        # print(response_dict['prayers'][prayer_index])
+            self.time_waktu_solat_next.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['fajr']).strftime("%H:%M")))   
+        #print(response_dict)         
 
 if __name__ == "__main__":
     import sys
