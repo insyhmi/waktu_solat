@@ -2,12 +2,115 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import QTimer, QTime, QDate
 import requests
 import datetime
+import os
+import sys
 
+PATH = os.path.dirname(__file__)
 BASE_URL = "https://api.waktusolat.app/v2/solat/"
 ZONE = "JHR01"
+ZONE_CODE = []
+ZONE_CODE_DESCRIPTION = []
+SUCCESSFUL_LOAD = True
+
+class settings(QtCore.QObject):
+    onClosed = QtCore.pyqtSignal(str)
+    
+    def __init__(self, parent=None):
+        super(settings, self).__init__(parent) 
+    
+    def setupUi(self, Form):
+        try:
+            with open(os.path.join(PATH, "src", "current.txt"), "r") as current_zone:
+                ZONE = current_zone.readline()
+        except FileNotFoundError:
+            QtWidgets.QMessageBox.warning(
+                MainWindow,
+                "Warning",
+                "Current zone saves not found! Reverting to default value. Refer documentation for more information",
+                )
+        
+        self.Form = Form
+        Form.setObjectName("Form")
+        Form.resize(400, 300)
+        self.verticalLayout = QtWidgets.QVBoxLayout(Form)
+        self.verticalLayout.setObjectName("verticalLayout")
+        self.label = QtWidgets.QLabel(parent=Form)
+        self.label.setObjectName("label")
+        self.verticalLayout.addWidget(self.label)
+        self.zon_dropdown = QtWidgets.QComboBox(parent=Form)
+        self.zon_dropdown.setObjectName("zon_dropdown")
+        self.verticalLayout.addWidget(self.zon_dropdown)
+        self.horizontalLayout = QtWidgets.QHBoxLayout()
+        self.horizontalLayout.setObjectName("horizontalLayout")
+        self.saveButton = QtWidgets.QPushButton(parent=Form)
+        self.saveButton.setObjectName("saveButton")
+        self.horizontalLayout.addWidget(self.saveButton)
+        self.cancelButton = QtWidgets.QPushButton(parent=Form)
+        self.cancelButton.setObjectName("cancelButton")
+        self.horizontalLayout.addWidget(self.cancelButton)
+        self.verticalLayout.addLayout(self.horizontalLayout)
+        spacerItem = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
+        self.verticalLayout.addItem(spacerItem)
+
+        self.zon_dropdown.addItems(ZONE_CODE_DESCRIPTION)
+        self.zon_dropdown.setCurrentIndex(ZONE_CODE.index(ZONE))
+        self.saveButton.clicked.connect(self.saveSettings)
+        self.cancelButton.clicked.connect(self.exitSettings)
+        self.retranslateUi(Form)
+        QtCore.QMetaObject.connectSlotsByName(Form)
+
+    def retranslateUi(self, Form):
+        _translate = QtCore.QCoreApplication.translate
+        Form.setWindowTitle(_translate("Form", "Settings"))
+        self.label.setText(_translate("Form", "Zon Waktu Solat"))
+        self.saveButton.setText(_translate("Form", "Simpan"))
+        self.cancelButton.setText(_translate("Form", "Keluar"))
+    
+    def saveSettings(self):
+        ZONE = ZONE_CODE[self.zon_dropdown.currentIndex()]
+        with open(os.path.join(PATH, "src", "current.txt"), "w") as current_zone:
+            current_zone.write(ZONE)
+        self.onClosed.emit("1") # Setting modification was made
+        self.Form.close()
+
+    def exitSettings(self):
+        self.Form.close()
 
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
+        try:
+            with open(os.path.join(PATH, "src", "zon.txt"), "r") as zone_file:
+                for code in zone_file:
+                    ZONE_CODE.append(code.strip())
+        except FileNotFoundError:
+            QtWidgets.QMessageBox.critical(
+                MainWindow,
+                "Error",
+                "File 'zone' not found. Refer documentation for more information (01)",
+                )
+            sys.exit(-1)
+            
+        try:
+            with open(os.path.join(PATH, "src", "zon_description.txt"), "r") as zone_description_file:
+                for description in zone_description_file:
+                    ZONE_CODE_DESCRIPTION.append(description.strip())
+        except FileNotFoundError:
+            QtWidgets.QMessageBox.critical(
+                MainWindow,
+                "Error",
+                "File 'zon_description' not found. Refer documentation for more information (02)",
+                )
+            sys.exit(-1)
+            
+        try:
+            with open(os.path.join(PATH, "src", "current.txt"), "r") as current_zone:
+                ZONE = current_zone.readline()
+        except FileNotFoundError:
+            QtWidgets.QMessageBox.warning(
+                MainWindow,
+                "Warning",
+                "Current zone saves not found! Reverting to default value. Refer documentation for more information",
+                )
         MainWindow.setObjectName("MainWindow")
         MainWindow.resize(955, 527)
         MainWindow.setWindowTitle("Waktu Solat")
@@ -191,6 +294,7 @@ class Ui_MainWindow(object):
         MainWindow.setStatusBar(self.statusbar)
         self.actionSettings = QtGui.QAction(parent=MainWindow)
         self.actionSettings.setObjectName("actionSettings")
+        self.actionSettings.triggered.connect(self.launchSettings)
         self.actionQuit = QtGui.QAction(parent=MainWindow)
         self.actionQuit.setObjectName("actionQuit")
         self.actionRefresh = QtGui.QAction(parent=MainWindow)
@@ -238,7 +342,7 @@ class Ui_MainWindow(object):
     def update_time(self):
         current_time = QTime.currentTime()
         formatted_time = current_time.toString("hh:mm:ss")
-        if formatted_time[:2] == '00' and formatted_time[-2:] == '00':
+        if formatted_time == "00:00:00":
             self.update_date()
             print("Updating date")
         self.masa.setText(formatted_time)
@@ -254,6 +358,12 @@ class Ui_MainWindow(object):
         year = today.year
         response = requests.get(f'{BASE_URL}{zone}')
         if response.status_code != 200:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Error",
+                "f{status.code} Unable to get response from the server"
+            )
+            sys.exit(-1)
             return
         prayer_index = today.day - 1
         response_dict = response.json()
@@ -291,14 +401,31 @@ class Ui_MainWindow(object):
                     year += 1
                 next_month_url = f"https://api.waktusolat.app/v2/solat/{zone}?year={year}&month={month}"
                 response = requests.get(next_month_url)
+                if response.status_code != 200:
+                    QtWidgets.QMessageBox.warning(
+                        self,
+                        "Warning",
+                        "f{status.code} Unable to get response from the server"
+                    )
                 response_dict = response.json()
-            #print(prayer_index, month)
             self.label_waktu_solat_next.setText("Subuh")
             self.time_waktu_solat_next.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['fajr']).strftime("%H:%M")))   
-        #print(response_dict)         
+
+    def launchSettings(self):
+        self.form = QtWidgets.QWidget()
+        self.settings = settings()
+        self.settings.setupUi(self.form)
+        self.settings.onClosed.connect(self.closeSettings)
+        self.form.show()
+
+    def closeSettings(self, event):
+        if event == "1":
+            with open(os.path.join(PATH, "src","current.txt"), "r") as current_zone:
+                ZONE = current_zone.readline()
+            self.get_waktu(ZONE)
+        
 
 if __name__ == "__main__":
-    import sys
     app = QtWidgets.QApplication(sys.argv)
     MainWindow = QtWidgets.QMainWindow()
     ui = Ui_MainWindow()
