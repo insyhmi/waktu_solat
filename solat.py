@@ -4,6 +4,7 @@ import requests
 import datetime
 import os
 import sys
+import json
 
 PATH = os.path.dirname(__file__)
 BASE_URL = "https://api.waktusolat.app/v2/solat/"
@@ -20,7 +21,7 @@ class settings(QtCore.QObject):
     
     def setupUi(self, Form):
         try:
-            with open(os.path.join(PATH, "src", "current.txt"), "r") as current_zone:
+            with open(os.path.join(PATH, "src", "current.dat"), "r") as current_zone:
                 ZONE = current_zone.readline()
         except FileNotFoundError:
             QtWidgets.QMessageBox.warning(
@@ -68,7 +69,7 @@ class settings(QtCore.QObject):
     
     def saveSettings(self):
         ZONE = ZONE_CODE[self.zon_dropdown.currentIndex()]
-        with open(os.path.join(PATH, "src", "current.txt"), "w") as current_zone:
+        with open(os.path.join(PATH, "src", "current.dat"), "w") as current_zone:
             current_zone.write(ZONE)
         self.onClosed.emit("1") # Setting modification was made
         self.Form.close()
@@ -77,9 +78,10 @@ class settings(QtCore.QObject):
         self.Form.close()
 
 class Ui_MainWindow(object):
+    ERR_CODE = 0
     def setupUi(self, MainWindow):
         try:
-            with open(os.path.join(PATH, "src", "zon.txt"), "r") as zone_file:
+            with open(os.path.join(PATH, "src", "zon.dat"), "r") as zone_file:
                 for code in zone_file:
                     ZONE_CODE.append(code.strip())
         except FileNotFoundError:
@@ -91,7 +93,7 @@ class Ui_MainWindow(object):
             sys.exit(-1)
             
         try:
-            with open(os.path.join(PATH, "src", "zon_description.txt"), "r") as zone_description_file:
+            with open(os.path.join(PATH, "src", "zon_description.dat"), "r") as zone_description_file:
                 for description in zone_description_file:
                     ZONE_CODE_DESCRIPTION.append(description.strip())
         except FileNotFoundError:
@@ -103,7 +105,7 @@ class Ui_MainWindow(object):
             sys.exit(-1)
             
         try:
-            with open(os.path.join(PATH, "src", "current.txt"), "r") as current_zone:
+            with open(os.path.join(PATH, "src", "current.dat"), "r") as current_zone:
                 ZONE = current_zone.readline()
         except FileNotFoundError:
             QtWidgets.QMessageBox.warning(
@@ -111,9 +113,12 @@ class Ui_MainWindow(object):
                 "Warning",
                 "Current zone saves not found! Reverting to default value. Refer documentation for more information",
                 )
+            ZONE = "JHR01"
+            with open (os.path.join(PATH, "src", "current.dat"), "w") as current_zone:
+                current_zone.write(ZONE)
+        # -- begin qt designer
         MainWindow.setObjectName("MainWindow")
-        MainWindow.resize(955, 527)
-        MainWindow.setWindowTitle("Waktu Solat")
+        MainWindow.resize(960, 540)
         self.centralwidget = QtWidgets.QWidget(parent=MainWindow)
         self.centralwidget.setObjectName("centralwidget")
         self.verticalLayout_3 = QtWidgets.QVBoxLayout(self.centralwidget)
@@ -282,9 +287,16 @@ class Ui_MainWindow(object):
         self.horizontalLayout.addLayout(self.frame_isyak)
         self.verticalLayout.addLayout(self.horizontalLayout)
         self.verticalLayout_3.addLayout(self.verticalLayout)
+        self.current_zone_description = QtWidgets.QLabel(parent=self.centralwidget)
+        self.current_zone_description.setMaximumSize(QtCore.QSize(16777215, 24))
+        font = QtGui.QFont()
+        font.setPointSize(12)
+        self.current_zone_description.setFont(font)
+        self.current_zone_description.setObjectName("current_zone_description")
+        self.verticalLayout_3.addWidget(self.current_zone_description)
         MainWindow.setCentralWidget(self.centralwidget)
         self.menubar = QtWidgets.QMenuBar(parent=MainWindow)
-        self.menubar.setGeometry(QtCore.QRect(0, 0, 955, 26))
+        self.menubar.setGeometry(QtCore.QRect(0, 0, 960, 26))
         self.menubar.setObjectName("menubar")
         self.menuMenu = QtWidgets.QMenu(parent=self.menubar)
         self.menuMenu.setObjectName("menuMenu")
@@ -294,24 +306,37 @@ class Ui_MainWindow(object):
         MainWindow.setStatusBar(self.statusbar)
         self.actionSettings = QtGui.QAction(parent=MainWindow)
         self.actionSettings.setObjectName("actionSettings")
-        self.actionSettings.triggered.connect(self.launchSettings)
         self.actionQuit = QtGui.QAction(parent=MainWindow)
         self.actionQuit.setObjectName("actionQuit")
-        self.actionRefresh = QtGui.QAction(parent=MainWindow)
-        self.actionRefresh.setObjectName("actionRefresh")
-        self.menuMenu.addAction(self.actionRefresh)
         self.menuMenu.addAction(self.actionSettings)
         self.menuMenu.addAction(self.actionQuit)
         self.menubar.addAction(self.menuMenu.menuAction())
+
         self.retranslateUi(MainWindow)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
+        # -- end qt designer
+
+        self.actionSettings.triggered.connect(self.launchSettings)
+        self.actionQuit.triggered.connect(self.quitApp)
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_time)
         self.timer.start(1000) # Update every 1000 ms (1 second)
         self.update_date()
 
-        self.get_waktu(ZONE)
+        msg = ''
+        if not self.get_waktu(ZONE):
+            if self.ERR_CODE == 3:
+                msg = "Service return unexpected data. (03)"
+            elif self.ERR_CODE == 4:
+                msg = "Unable to connect to service. Ensure internet connectivity remains present"
+            QtWidgets.QMessageBox.critical(
+                MainWindow,
+                "Error",
+                msg
+                )
+            sys.exit(-1)
+            
 
     def retranslateUi(self, MainWindow):
         _translate = QtCore.QCoreApplication.translate
@@ -334,10 +359,10 @@ class Ui_MainWindow(object):
         self.time_maghrib.setText(_translate("MainWindow", "00:00"))
         self.label_isyak.setText(_translate("MainWindow", "Isyak"))
         self.time_isyak.setText(_translate("MainWindow", "00:00"))
+        self.current_zone_description.setText(_translate("MainWindow", "TextLabel"))
         self.menuMenu.setTitle(_translate("MainWindow", "Menu"))
         self.actionSettings.setText(_translate("MainWindow", "Settings"))
         self.actionQuit.setText(_translate("MainWindow", "Quit"))
-        self.actionRefresh.setText(_translate("MainWindow", "Refresh"))
 
     def update_time(self):
         current_time = QTime.currentTime()
@@ -353,20 +378,35 @@ class Ui_MainWindow(object):
         self.tarikh.setText(formatted_date)
 
     def get_waktu(self, zone):
+        cache = True
         today = datetime.datetime.today()
         month = today.month
         year = today.year
-        response = requests.get(f'{BASE_URL}{zone}')
-        if response.status_code != 200:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Error",
-                "f{status.code} Unable to get response from the server"
-            )
-            sys.exit(-1)
-            return
         prayer_index = today.day - 1
-        response_dict = response.json()
+        try:
+            with open (os.path.join(PATH,"src", "cache_zon.dat"), "r") as cache_file:
+                response_dict = json.loads(cache_file.read())
+                if response_dict['zone'] != zone or response_dict["month_number"] != month or response_dict["year"] != year:
+                    print("Current month, year or zone in file mismatch.")
+                    cache = False
+        except FileNotFoundError:
+            with open(os.path.join(PATH,"src", "cache_zon.dat"), "x") as cache_file:
+                cache = False
+        except json.decoder.JSONDecodeError: #cache file is empty
+            cache = False
+        if not cache:
+            try:
+                response = requests.get(f'{BASE_URL}{zone}')
+                if response.status_code != 200:
+                    self.ERR_CODE = 3
+                    return False
+            except requests.exceptions.ConnectionError:
+                self.ERR_CODE = 4
+                return False
+            response_dict = response.json()
+            with open(os.path.join(PATH, "src", "cache_zon.dat"), "w") as cache_file:
+                cache_file.write(json.dumps(response_dict))
+        self.current_zone_description.setText(f"Waktu solat bagi kawasan {ZONE_CODE_DESCRIPTION[(ZONE_CODE.index(zone))]}")
         self.time_subuh.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['fajr']).strftime("%H:%M")))
         self.time_syuruk.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['syuruk']).strftime("%H:%M")))
         self.time_zohor.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['dhuhr']).strftime("%H:%M")))
@@ -402,14 +442,12 @@ class Ui_MainWindow(object):
                 next_month_url = f"https://api.waktusolat.app/v2/solat/{zone}?year={year}&month={month}"
                 response = requests.get(next_month_url)
                 if response.status_code != 200:
-                    QtWidgets.QMessageBox.warning(
-                        self,
-                        "Warning",
-                        "f{status.code} Unable to get response from the server"
-                    )
+                    self.ERR_CODE = 3
+                    return False
                 response_dict = response.json()
             self.label_waktu_solat_next.setText("Subuh")
             self.time_waktu_solat_next.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['fajr']).strftime("%H:%M")))   
+        return True
 
     def launchSettings(self):
         self.form = QtWidgets.QWidget()
@@ -420,10 +458,12 @@ class Ui_MainWindow(object):
 
     def closeSettings(self, event):
         if event == "1":
-            with open(os.path.join(PATH, "src","current.txt"), "r") as current_zone:
+            with open(os.path.join(PATH, "src","current.dat"), "r") as current_zone:
                 ZONE = current_zone.readline()
             self.get_waktu(ZONE)
-        
+    
+    def quitApp(self):
+        sys.exit(0)
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)

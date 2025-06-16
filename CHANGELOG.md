@@ -23,3 +23,15 @@ Project Waktu Solat is created
 - Warning dialogs and Critical dialogs on error events
 ### Changed
 - Removed spaces in `README.md` dates in accordance to ISO 8601
+
+## 1.3 - 2025-06-16
+### Added 
+- A description of places about the saved time zone on the main window
+- Quit functionality on 'Quit' action button
+### Changed
+- Changed source files from ```.txt``` to ```.dat```
+- Set the default window size to 960px x 540px
+- Fixed critical message box not spawning properly on certain errors
+- Fixed issue of saving prayer time zone for the first time 
+### Removed
+- Refresh action button 
