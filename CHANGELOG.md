@@ -35,3 +35,7 @@ Project Waktu Solat is created
 - Fixed issue of saving prayer time zone for the first time 
 ### Removed
 - Refresh action button 
+
+## 1.4 - 2025-06-18
+### Removed
+- Qt status bar

@@ -375,7 +375,6 @@
    </widget>
    <addaction name="menuMenu"/>
   </widget>
-  <widget class="QStatusBar" name="statusbar"/>
   <action name="actionSettings">
    <property name="text">
     <string>Settings</string>
