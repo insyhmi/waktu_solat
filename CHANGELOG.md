@@ -39,3 +39,7 @@ Project Waktu Solat is created
 ## 1.4 - 2025-06-18
 ### Removed
 - Qt status bar
+
+## 1.4.1 - 2025-06-26
+### Changed
+- Bug fixed where user cannot load the app for the first time
