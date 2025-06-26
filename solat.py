@@ -103,7 +103,7 @@ class Ui_MainWindow(object):
                 "File 'zon_description' not found. Refer documentation for more information (02)",
                 )
             sys.exit(-1)
-            
+        ZONE = 'JHR01'
         try:
             with open(os.path.join(PATH, "src", "current.dat"), "r") as current_zone:
                 ZONE = current_zone.readline()
@@ -113,8 +113,7 @@ class Ui_MainWindow(object):
                 "Warning",
                 "Current zone saves not found! Reverting to default value. Refer documentation for more information",
                 )
-            ZONE = "JHR01"
-            with open (os.path.join(PATH, "src", "current.dat"), "w") as current_zone:
+            with open(os.path.join(PATH, "src", "current.dat"), "w") as current_zone:
                 current_zone.write(ZONE)
         # -- begin qt designer
         MainWindow.setObjectName("MainWindow")
@@ -301,12 +300,13 @@ class Ui_MainWindow(object):
         self.menuMenu = QtWidgets.QMenu(parent=self.menubar)
         self.menuMenu.setObjectName("menuMenu")
         MainWindow.setMenuBar(self.menubar)
+        self.statusbar = QtWidgets.QStatusBar(parent=MainWindow)
+        self.statusbar.setObjectName("statusbar")
+        MainWindow.setStatusBar(self.statusbar)
         self.actionSettings = QtGui.QAction(parent=MainWindow)
         self.actionSettings.setObjectName("actionSettings")
         self.actionQuit = QtGui.QAction(parent=MainWindow)
         self.actionQuit.setObjectName("actionQuit")
-        self.actionRefresh = QtGui.QAction(parent=MainWindow)
-        self.actionRefresh.setObjectName("actionRefresh")
         self.menuMenu.addAction(self.actionSettings)
         self.menuMenu.addAction(self.actionQuit)
         self.menubar.addAction(self.menuMenu.menuAction())
