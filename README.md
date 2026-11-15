@@ -1,7 +1,12 @@
 # Waktu Solat
-Waktu Solat is a desktop application developed with Python PyQt6 library to provide accurate Malaysia praying times.
+Waktu Solat is a desktop application developed with Python PyQt6 library to provide accurate Malaysia and Australia praying times.
 ## Background
 Waktu Solat was once a sandbox file to learn and experiment with PyQt6 features and API usages within Python. It was mainly used alongside Qt designer in designing UI placements and parameters. Over time, new functionalites are added in conjunction with my leaning input to become the current file.
+
+## Prayer Time Calculation
+
+### Malaysia 
+Prayer times in Malaysia is provided by Waktu Solat API using accurate data from Jabatan Kemajuan Islam Malaysia (JAKIM).
 ## Usage
 Run ```pip install -r requirements.txt``` to install the required libraries.<br>
 Then, run ```solat.py```.<br><br>

@@ -1,5 +1,6 @@
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import QTimer, QTime, QDate
+from zoneinfo import ZoneInfo
 import requests
 import datetime
 import os
@@ -7,11 +8,115 @@ import sys
 import json
 
 PATH = os.path.dirname(__file__)
-BASE_URL = "https://api.waktusolat.app/v2/solat/"
+BASE_URL_MALAYSIA = "https://api.waktusolat.app/v2/solat/"
+BASE_URL_AUS = "https://api.aladhan.com/v1/timings/"  
 ZONE = "JHR01"
 ZONE_CODE = []
 ZONE_CODE_DESCRIPTION = []
 SUCCESSFUL_LOAD = True
+
+COUNTRIES = {"Malaysia": "MY", "Australia": "AU"}
+COUNTRY_NAMES = {v: k for k, v in COUNTRIES.items()}
+
+# For Australia cities
+# city: (latitude, longitude, timezone) 
+AU_CITIES = {
+    "Sydney":    (-33.8688, 151.2093, "Australia/Sydney"),
+    "Melbourne": (-37.8136, 144.9631, "Australia/Melbourne"),
+    "Brisbane":  (-27.4698, 153.0251, "Australia/Brisbane"),
+    "Perth":     (-31.9505, 115.8605, "Australia/Perth"),
+    "Adelaide":  (-34.9285, 138.6007, "Australia/Adelaide"),
+    "Canberra":  (-35.2809, 149.1300, "Australia/Sydney"),
+    "Hobart":    (-42.8821, 147.3272, "Australia/Hobart"),
+    "Darwin":    (-12.4634, 130.8456, "Australia/Darwin"),
+}
+AU_METHOD = 3  # Muslim World League
+
+CACHE_FILE = os.path.join(PATH, "src", "cache_zon.dat")
+
+SELECTION_FILE = os.path.join(PATH, "src", "current.dat")
+
+PRAYER_ORDER = [("fajr", "Subuh"), ("syuruk", "Syuruk"), ("dhuhr", "Zohor"),
+                ("asr", "Asar"), ("maghrib", "Maghrib"), ("isha", "Isyak")]
+
+"""
+Returns (country_code, zone). 
+Old files holding just 'JHR01' still work.
+"""
+def load_selection():
+    try:
+        with open(SELECTION_FILE) as f:
+            raw = f.readline().strip()
+    except FileNotFoundError:
+        return "MY", "JHR01"
+    if ":" in raw:
+        country, zone = raw.split(":", 1)
+        return country, zone
+    return "MY", raw or "JHR01"
+
+
+def save_selection(country, zone):
+    with open(SELECTION_FILE, "w") as f:
+        f.write(f"{country}:{zone}")
+
+
+def zone_tz(country, zone):
+    if country == "AU":
+        return ZoneInfo(AU_CITIES[zone][2])
+    return ZoneInfo("Asia/Kuala_Lumpur")
+
+
+def _parse_time(value, day, tz):
+    value = value.strip()
+    try:
+        return datetime.datetime.fromisoformat(value).astimezone(tz)
+    except ValueError:
+        hh, mm = value.split(" ")[0].split(":")
+        return datetime.datetime.combine(day, datetime.time(int(hh), int(mm)), tzinfo=tz)
+
+
+def _fetch_my(zone, day):
+    tz = zone_tz("MY", zone)
+    r = requests.get(f"{BASE_URL_MALAYSIA}{zone}",
+                     params={"year": day.year, "month": day.month}, timeout=10)
+    r.raise_for_status()
+    entry = r.json()["prayers"][day.day - 1]
+    return {k: datetime.datetime.fromtimestamp(entry[k], tz) for k, _ in PRAYER_ORDER}
+
+
+def _fetch_au(city, day):
+    lat, lon, tzname = AU_CITIES[city]
+    tz = ZoneInfo(tzname)
+    r = requests.get(f"{BASE_URL_AUS}{day:%d-%m-%Y}",
+                     params={"latitude": lat, "longitude": lon,
+                             "method": AU_METHOD, "timezonestring": tzname},
+                     timeout=10)
+    r.raise_for_status()
+    t = r.json()["data"]["timings"]
+    mapping = {"fajr": "Fajr", "syuruk": "Sunrise", "dhuhr": "Dhuhr",
+               "asr": "Asr", "maghrib": "Maghrib", "isha": "Isha"}
+    return {k: _parse_time(t[v], day, tz) for k, v in mapping.items()}
+
+"""Normalised {'fajr': aware datetime, ...} for one day, with a small file cache."""
+def get_times(country, zone, day):
+    key = f"{country}:{zone}:{day.isoformat()}"
+    try:
+        with open(CACHE_FILE) as f:
+            cache = json.load(f)
+        cache = {k: v for k, v in cache.items() if isinstance(v, dict) and ":" in k}
+    except (FileNotFoundError, json.JSONDecodeError):
+        cache = {}
+
+    if key in cache:
+        return {k: datetime.datetime.fromisoformat(v) for k, v in cache[key].items()}
+
+    times = _fetch_au(zone, day) if country == "AU" else _fetch_my(zone, day)
+
+    cache = {k: v for k, v in cache.items() if k.rsplit(":", 1)[1] >= day.isoformat()}
+    cache[key] = {k: v.isoformat() for k, v in times.items()}
+    with open(CACHE_FILE, "w") as f:
+        json.dump(cache, f)
+    return times
 
 class settings(QtCore.QObject):
     onClosed = QtCore.pyqtSignal(str)
@@ -20,16 +125,6 @@ class settings(QtCore.QObject):
         super(settings, self).__init__(parent) 
     
     def setupUi(self, Form):
-        try:
-            with open(os.path.join(PATH, "src", "current.dat"), "r") as current_zone:
-                ZONE = current_zone.readline()
-        except FileNotFoundError:
-            QtWidgets.QMessageBox.warning(
-                MainWindow,
-                "Warning",
-                "Current zone saves not found! Reverting to default value. Refer documentation for more information",
-                )
-        
         self.Form = Form
         Form.setObjectName("Form")
         Form.resize(400, 300)
@@ -38,6 +133,12 @@ class settings(QtCore.QObject):
         self.label = QtWidgets.QLabel(parent=Form)
         self.label.setObjectName("label")
         self.verticalLayout.addWidget(self.label)
+        self.country_dropdown = QtWidgets.QComboBox(parent=Form)
+        self.country_dropdown.setObjectName("country_dropdown")
+        self.verticalLayout.addWidget(self.country_dropdown)
+        self.zon_dropdown = QtWidgets.QComboBox(parent=Form)
+        self.zon_dropdown.setObjectName("zon_dropdown")
+        self.verticalLayout.addWidget(self.zon_dropdown)
         self.zon_dropdown = QtWidgets.QComboBox(parent=Form)
         self.zon_dropdown.setObjectName("zon_dropdown")
         self.verticalLayout.addWidget(self.zon_dropdown)
@@ -53,8 +154,15 @@ class settings(QtCore.QObject):
         spacerItem = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Policy.Minimum, QtWidgets.QSizePolicy.Policy.Expanding)
         self.verticalLayout.addItem(spacerItem)
 
-        self.zon_dropdown.addItems(ZONE_CODE_DESCRIPTION)
-        self.zon_dropdown.setCurrentIndex(ZONE_CODE.index(ZONE))
+        self.zones = []
+        country, zone = load_selection()
+        self.country_dropdown.addItems(list(COUNTRIES))
+        self.country_dropdown.setCurrentText(COUNTRY_NAMES.get(country, "Malaysia"))
+        self.populate_zones()
+        for i, (code, _) in enumerate(self.zones):
+            if code == zone:
+                self.zon_dropdown.setCurrentIndex(i)
+        self.country_dropdown.currentIndexChanged.connect(self.populate_zones)
         self.saveButton.clicked.connect(self.saveSettings)
         self.cancelButton.clicked.connect(self.exitSettings)
         self.retranslateUi(Form)
@@ -67,11 +175,20 @@ class settings(QtCore.QObject):
         self.saveButton.setText(_translate("Form", "Simpan"))
         self.cancelButton.setText(_translate("Form", "Keluar"))
     
+    def populate_zones(self):
+        code = COUNTRIES[self.country_dropdown.currentText()]
+        if code == "AU":
+            self.zones = [(c, c) for c in AU_CITIES]
+        else:
+            self.zones = list(zip(ZONE_CODE, ZONE_CODE_DESCRIPTION))
+        self.zon_dropdown.clear()
+        self.zon_dropdown.addItems([desc for _, desc in self.zones])
+
     def saveSettings(self):
-        ZONE = ZONE_CODE[self.zon_dropdown.currentIndex()]
-        with open(os.path.join(PATH, "src", "current.dat"), "w") as current_zone:
-            current_zone.write(ZONE)
-        self.onClosed.emit("1") # Setting modification was made
+        country = COUNTRIES[self.country_dropdown.currentText()]
+        zone = self.zones[self.zon_dropdown.currentIndex()][0]
+        save_selection(country, zone)
+        self.onClosed.emit("1")
         self.Form.close()
 
     def exitSettings(self):
@@ -91,7 +208,6 @@ class Ui_MainWindow(object):
                 "File 'zone' not found. Refer documentation for more information (01)",
                 )
             sys.exit(-1)
-            
         try:
             with open(os.path.join(PATH, "src", "zon_description.dat"), "r") as zone_description_file:
                 for description in zone_description_file:
@@ -103,18 +219,9 @@ class Ui_MainWindow(object):
                 "File 'zon_description' not found. Refer documentation for more information (02)",
                 )
             sys.exit(-1)
-        ZONE = 'JHR01'
-        try:
-            with open(os.path.join(PATH, "src", "current.dat"), "r") as current_zone:
-                ZONE = current_zone.readline()
-        except FileNotFoundError:
-            QtWidgets.QMessageBox.warning(
-                MainWindow,
-                "Warning",
-                "Current zone saves not found! Reverting to default value. Refer documentation for more information",
-                )
-            with open(os.path.join(PATH, "src", "current.dat"), "w") as current_zone:
-                current_zone.write(ZONE)
+        
+        self.main_window = MainWindow
+        country, ZONE = load_selection()
         # -- begin qt designer
         MainWindow.setObjectName("MainWindow")
         MainWindow.resize(960, 540)
@@ -324,7 +431,7 @@ class Ui_MainWindow(object):
         self.update_date()
 
         msg = ''
-        if not self.get_waktu(ZONE):
+        if not self.get_waktu(country, ZONE):
             if self.ERR_CODE == 3:
                 msg = "Service return unexpected data. (03)"
             elif self.ERR_CODE == 4:
@@ -376,77 +483,44 @@ class Ui_MainWindow(object):
         formatted_date = current_date.toString("dd/MM/yyyy")
         self.tarikh.setText(formatted_date)
 
-    def get_waktu(self, zone):
-        cache = True
-        today = datetime.datetime.today()
-        month = today.month
-        year = today.year
-        prayer_index = today.day - 1
+    def get_waktu(self, country, zone):
         try:
-            with open (os.path.join(PATH,"src", "cache_zon.dat"), "r") as cache_file:
-                response_dict = json.loads(cache_file.read())
-                if response_dict['zone'] != zone or response_dict["month_number"] != month or response_dict["year"] != year:
-                    print("Current month, year or zone in file mismatch.")
-                    cache = False
-        except FileNotFoundError:
-            with open(os.path.join(PATH,"src", "cache_zon.dat"), "x") as cache_file:
-                cache = False
-        except json.decoder.JSONDecodeError: #cache file is empty
-            cache = False
-        if not cache:
-            try:
-                response = requests.get(f'{BASE_URL}{zone}')
-                if response.status_code != 200:
-                    self.ERR_CODE = 3
-                    return False
-            except requests.exceptions.ConnectionError:
-                self.ERR_CODE = 4
-                return False
-            response_dict = response.json()
-            with open(os.path.join(PATH, "src", "cache_zon.dat"), "w") as cache_file:
-                cache_file.write(json.dumps(response_dict))
-        self.current_zone_description.setText(f"Waktu solat bagi kawasan {ZONE_CODE_DESCRIPTION[(ZONE_CODE.index(zone))]}")
-        self.time_subuh.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['fajr']).strftime("%H:%M")))
-        self.time_syuruk.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['syuruk']).strftime("%H:%M")))
-        self.time_zohor.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['dhuhr']).strftime("%H:%M")))
-        self.time_asar.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['asr']).strftime("%H:%M")))
-        self.time_maghrib.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['maghrib']).strftime("%H:%M")))
-        self.time_isyak.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['isha']).strftime("%H:%M")))
-        if int(today.timestamp()) < response_dict['prayers'][prayer_index]['fajr']:
-            self.label_waktu_solat_next.setText("Subuh")
-            self.time_waktu_solat_next.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['fajr']).strftime("%H:%M")))
-        elif int(today.timestamp()) < response_dict['prayers'][prayer_index]['syuruk']:
-            self.label_waktu_solat_next.setText("Syuruk")
-            self.time_waktu_solat_next.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['syuruk']).strftime("%H:%M")))
-        elif int(today.timestamp()) < response_dict['prayers'][prayer_index]['dhuhr']:
-            self.label_waktu_solat_next.setText("Zohor")
-            self.time_waktu_solat_next.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['dhuhr']).strftime("%H:%M")))
-        elif int(today.timestamp()) < response_dict['prayers'][prayer_index]['asr']:
-            self.label_waktu_solat_next.setText("Asar")
-            self.time_waktu_solat_next.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['asr']).strftime("%H:%M")))
-        elif int(today.timestamp()) < response_dict['prayers'][prayer_index]['maghrib']:
-            self.label_waktu_solat_next.setText("Maghrib")
-            self.time_waktu_solat_next.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['maghrib']).strftime("%H:%M")))
-        elif int(today.timestamp()) < response_dict['prayers'][prayer_index]['isha']:
-            self.label_waktu_solat_next.setText("Isyak")
-            self.time_waktu_solat_next.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['isha']).strftime("%H:%M")))
-        else:
-            prayer_index += 1
-            if prayer_index == len(response_dict['prayers']):
-                prayer_index = 0
-                month += 1
-                if month == 13:
-                    month = 1
-                    year += 1
-                next_month_url = f"https://api.waktusolat.app/v2/solat/{zone}?year={year}&month={month}"
-                response = requests.get(next_month_url)
-                if response.status_code != 200:
-                    self.ERR_CODE = 3
-                    return False
-                response_dict = response.json()
-            self.label_waktu_solat_next.setText("Subuh")
-            self.time_waktu_solat_next.setText(str(datetime.datetime.fromtimestamp(response_dict['prayers'][prayer_index]['fajr']).strftime("%H:%M")))   
-        return True
+            tz = zone_tz(country, zone)
+            today = datetime.datetime.now(tz).date()
+            times = get_times(country, zone, today)
+            now = datetime.datetime.now(tz)
+
+            widgets = {"fajr": self.time_subuh, "syuruk": self.time_syuruk,
+                       "dhuhr": self.time_zohor, "asr": self.time_asar,
+                       "maghrib": self.time_maghrib, "isha": self.time_isyak}
+            for key, widget in widgets.items():
+                widget.setText(times[key].strftime("%H:%M"))
+
+            if country == "AU":
+                desc = f"{zone}, Australia"
+            else:
+                desc = ZONE_CODE_DESCRIPTION[ZONE_CODE.index(zone)]
+            self.current_zone_description.setText(f"Waktu solat bagi kawasan {desc}")
+
+            for key, label in PRAYER_ORDER:
+                if now < times[key]:
+                    next_label, next_time = label, times[key]
+                    break
+            else:  # all of today's prayers have passed -> tomorrow's Subuh
+                tomorrow = get_times(country, zone, today + datetime.timedelta(days=1))
+                next_label, next_time = "Subuh", tomorrow["fajr"]
+
+            self.label_waktu_solat_next.setText(next_label)
+            self.time_waktu_solat_next.setText(next_time.strftime("%H:%M"))
+            return True
+
+        except requests.exceptions.RequestException:
+            import traceback; traceback.print_exc()
+            self.ERR_CODE = 4
+        except (KeyError, IndexError, ValueError):
+            import traceback; traceback.print_exc()
+            self.ERR_CODE = 3
+        return False
 
     def launchSettings(self):
         self.form = QtWidgets.QWidget()
@@ -457,17 +531,58 @@ class Ui_MainWindow(object):
 
     def closeSettings(self, event):
         if event == "1":
-            with open(os.path.join(PATH, "src","current.dat"), "r") as current_zone:
-                ZONE = current_zone.readline()
-            self.get_waktu(ZONE)
+            country, zone = load_selection()
+            if not self.get_waktu(country, zone):
+                QtWidgets.QMessageBox.warning(
+                    self.form, "Warning", "Unable to load prayer times for that location.")
     
     def quitApp(self):
-        sys.exit(0)
+        self.main_window.confirm_quit = True
+        QtWidgets.QApplication.quit()
+
+class AppWindow(QtWidgets.QMainWindow):
+
+    confirm_quit = False
+    def closeEvent(self, event):
+        if self.confirm_quit:
+            event.accept()
+        else:
+            event.ignore()
+            self.hide()
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
-    MainWindow = QtWidgets.QMainWindow()
+    app.setQuitOnLastWindowClosed(False)
+
+    MainWindow = AppWindow()
     ui = Ui_MainWindow()
     ui.setupUi(MainWindow)
+    icon_path = os.path.join(PATH, "src", "icon.png")
+    if os.path.exists(icon_path):
+        icon = QtGui.QIcon(icon_path)
+    else:
+        icon = app.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_ComputerIcon)
+    MainWindow.setWindowIcon(icon)
+    tray = QtWidgets.QSystemTrayIcon(icon, MainWindow)
+    tray.setToolTip("Waktu Solat")
+
+    def show_window():
+        MainWindow.show()
+        MainWindow.setWindowState(MainWindow.windowState() & ~QtCore.Qt.WindowState.WindowMinimized)
+        MainWindow.raise_()
+        MainWindow.activateWindow()
+
+    tray_menu = QtWidgets.QMenu()
+    show_action = tray_menu.addAction("Show")
+    show_action.triggered.connect(show_window)
+    quit_action = tray_menu.addAction("Quit")
+    quit_action.triggered.connect(ui.quitApp)
+    tray.setContextMenu(tray_menu)
+    tray.activated.connect(
+        lambda reason: show_window()
+        if reason in (QtWidgets.QSystemTrayIcon.ActivationReason.Trigger, QtWidgets.QSystemTrayIcon.ActivationReason.DoubleClick)
+        else None)
+    tray.show()
+
     MainWindow.show()
     sys.exit(app.exec())
