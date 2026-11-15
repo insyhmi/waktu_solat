@@ -43,3 +43,19 @@ Project Waktu Solat is created
 ## 1.4.1 - 2025-06-26
 ### Changed
 - Bug fixed where user cannot load the app for the first time
+
+## 1.5 - 2026-11-15
+### Added 
+- Australia prayer times
+- System tray 
+- Virtual environemnt development setup (this does not impact production system)
+- ```tzdata``` library
+
+### Changed
+- Major codebase refactor to implement two different API calls
+- Settings now take Australian values
+
+## 1.5.1 - 2026-11-15
+### Added 
+- Desktop notification on prayer time arrivals
+- Exe app for use

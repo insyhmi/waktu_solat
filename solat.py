@@ -7,7 +7,6 @@ import os
 import sys
 import json
 
-PATH = os.path.dirname(__file__)
 BASE_URL_MALAYSIA = "https://api.waktusolat.app/v2/solat/"
 BASE_URL_AUS = "https://api.aladhan.com/v1/timings/"  
 ZONE = "JHR01"
@@ -32,13 +31,34 @@ AU_CITIES = {
 }
 AU_METHOD = 3  # Muslim World League
 
-CACHE_FILE = os.path.join(PATH, "src", "cache_zon.dat")
-
-SELECTION_FILE = os.path.join(PATH, "src", "current.dat")
-
 PRAYER_ORDER = [("fajr", "Subuh"), ("syuruk", "Syuruk"), ("dhuhr", "Zohor"),
                 ("asr", "Asar"), ("maghrib", "Maghrib"), ("isha", "Isyak")]
 
+ALERT_KEYS = {"fajr", "dhuhr", "asr", "maghrib", "isha"}
+ALERT_WINDOW = datetime.timedelta(minutes=2) 
+RETRY_DELAY = datetime.timedelta(seconds=60) 
+
+def resource_path(*parts):
+    """Read-only files bundled with the app."""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, *parts)
+
+
+def data_dir():
+    """Writable per-user folder for settings and cache."""
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA", os.path.expanduser("~"))
+    elif sys.platform == "darwin":
+        base = os.path.expanduser("~/Library/Application Support")
+    else:
+        base = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
+    path = os.path.join(base, "WaktuSolat")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+CACHE_FILE = os.path.join(data_dir(), "cache_zon.dat")
+SELECTION_FILE = os.path.join(data_dir(), "current.dat")
 """
 Returns (country_code, zone). 
 Old files holding just 'JHR01' still work.
@@ -54,17 +74,14 @@ def load_selection():
         return country, zone
     return "MY", raw or "JHR01"
 
-
 def save_selection(country, zone):
     with open(SELECTION_FILE, "w") as f:
         f.write(f"{country}:{zone}")
-
 
 def zone_tz(country, zone):
     if country == "AU":
         return ZoneInfo(AU_CITIES[zone][2])
     return ZoneInfo("Asia/Kuala_Lumpur")
-
 
 def _parse_time(value, day, tz):
     value = value.strip()
@@ -74,7 +91,6 @@ def _parse_time(value, day, tz):
         hh, mm = value.split(" ")[0].split(":")
         return datetime.datetime.combine(day, datetime.time(int(hh), int(mm)), tzinfo=tz)
 
-
 def _fetch_my(zone, day):
     tz = zone_tz("MY", zone)
     r = requests.get(f"{BASE_URL_MALAYSIA}{zone}",
@@ -82,7 +98,6 @@ def _fetch_my(zone, day):
     r.raise_for_status()
     entry = r.json()["prayers"][day.day - 1]
     return {k: datetime.datetime.fromtimestamp(entry[k], tz) for k, _ in PRAYER_ORDER}
-
 
 def _fetch_au(city, day):
     lat, lon, tzname = AU_CITIES[city]
@@ -196,9 +211,13 @@ class settings(QtCore.QObject):
 
 class Ui_MainWindow(object):
     ERR_CODE = 0
+    tray = None
+    current_times = None
+    notified = set()
+    next_retry = None
     def setupUi(self, MainWindow):
         try:
-            with open(os.path.join(PATH, "src", "zon.dat"), "r") as zone_file:
+            with open(resource_path("src", "zon.dat"), "r") as zone_file:
                 for code in zone_file:
                     ZONE_CODE.append(code.strip())
         except FileNotFoundError:
@@ -209,7 +228,7 @@ class Ui_MainWindow(object):
                 )
             sys.exit(-1)
         try:
-            with open(os.path.join(PATH, "src", "zon_description.dat"), "r") as zone_description_file:
+            with open(resource_path("src", "zon_description.dat"), "r") as zone_description_file:
                 for description in zone_description_file:
                     ZONE_CODE_DESCRIPTION.append(description.strip())
         except FileNotFoundError:
@@ -477,6 +496,31 @@ class Ui_MainWindow(object):
             self.update_date()
             print("Updating date")
         self.masa.setText(formatted_time)
+        self.check_alerts()
+
+    def check_alerts(self):
+        if not self.current_times:
+            return
+        now = datetime.datetime.now(self.current_tz)
+        for key, label in PRAYER_ORDER:
+            t = self.current_times[key]
+            marker = (self.current_date, key)
+            if key in ALERT_KEYS and marker not in self.notified and t <= now < t + ALERT_WINDOW:
+                self.notified.add(marker)
+                if self.tray:
+                    self.tray.showMessage(
+                        "Waktu Solat",
+                        f"Masuk waktu {label} ({t.strftime('%H:%M')})",
+                        QtWidgets.QSystemTrayIcon.MessageIcon.Information,
+                        10000)
+                self.notified = {m for m in self.notified if m[0] >= self.current_date}
+
+        if now.date() != self.current_date or now >= self.next_time:
+            if self.next_retry is None or now >= self.next_retry:
+                if not self.get_waktu(self.current_country, self.current_zone):
+                    self.next_retry = now + RETRY_DELAY   # retry in a minute, not every second
+                else:
+                    self.next_retry = None
 
     def update_date(self):
         current_date = QDate.currentDate()
@@ -512,6 +556,8 @@ class Ui_MainWindow(object):
 
             self.label_waktu_solat_next.setText(next_label)
             self.time_waktu_solat_next.setText(next_time.strftime("%H:%M"))
+            self.current_country, self.current_zone, self.current_tz = country, zone, tz
+            self.current_times, self.current_date, self.next_time = times, today, next_time
             return True
 
         except requests.exceptions.RequestException:
@@ -534,7 +580,7 @@ class Ui_MainWindow(object):
             country, zone = load_selection()
             if not self.get_waktu(country, zone):
                 QtWidgets.QMessageBox.warning(
-                    self.form, "Warning", "Unable to load prayer times for that location.")
+                    self.form, "Warning", "Unable to load prayer times for the selected location.")
     
     def quitApp(self):
         self.main_window.confirm_quit = True
@@ -557,14 +603,15 @@ if __name__ == "__main__":
     MainWindow = AppWindow()
     ui = Ui_MainWindow()
     ui.setupUi(MainWindow)
-    icon_path = os.path.join(PATH, "src", "icon.png")
+    icon_path = resource_path("src", "icon.png")
     if os.path.exists(icon_path):
         icon = QtGui.QIcon(icon_path)
     else:
         icon = app.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_ComputerIcon)
     MainWindow.setWindowIcon(icon)
     tray = QtWidgets.QSystemTrayIcon(icon, MainWindow)
-    tray.setToolTip("Waktu Solat")
+    ui.tray = tray
+    tray.setToolTip("Lanx's Waktu Solat")
 
     def show_window():
         MainWindow.show()
