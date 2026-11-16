@@ -59,3 +59,14 @@ Project Waktu Solat is created
 ### Added 
 - Desktop notification on prayer time arrivals
 - Exe app for use
+
+## 1.6 - 2026-11-16
+### Added 
+- Azan notification
+- Azan customization
+
+### Changed
+- Desktop notification description to include location of prayer time
+
+### Fixed
+- Removed ghost dropdown

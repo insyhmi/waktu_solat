@@ -6,9 +6,10 @@ Waktu Solat was once a sandbox file to learn and experiment with PyQt6 features 
 ## Features
 
 - Daily prayer time updates.
-- Customizable location in Malaysia and Australia
-- Notification for when it is time for prayer
-- Runs in system tray background.  
+- Customizable location in Malaysia and Australia.
+- Azan notification for when it is time for prayer.
+- Runs in system tray background.
+- Selection of azan audios as notification sound.
 
 ## Prayer Time Calculation
 
@@ -21,7 +22,7 @@ Waktu Solat was once a sandbox file to learn and experiment with PyQt6 features 
 
 ## Usage
 
-Download ```.exe``` here -> [LanxWaktuSolat.exe](https://1drv.ms/u/c/429aeee96853109f/IQAmT4c5c9pbQptcvmvrWeftARgSAlVXze0pRrYLP3x5QHw?e=WjDdGR)
+Download ```.exe``` here -> [LanxWaktuSolat.exe](https://1drv.ms/u/c/429aeee96853109f/IQA5xJUnXZwiQ6XCoI1W98JFARfx61yFVeddHh73syMQ6-o?e=S3WfXl)
 
 or
 

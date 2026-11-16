@@ -1,3 +1,5 @@
 cache_zon.dat
 current.dat
 dist/
+build/
+uv.lock

@@ -1,6 +1,7 @@
 from PyQt6 import QtCore, QtGui, QtWidgets
-from PyQt6.QtCore import QTimer, QTime, QDate
+from PyQt6.QtCore import QTimer, QTime, QDate, QUrl
 from zoneinfo import ZoneInfo
+from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 import requests
 import datetime
 import os
@@ -56,6 +57,60 @@ def data_dir():
     os.makedirs(path, exist_ok=True)
     return path
 
+AZAN_DIR = os.path.join(data_dir(), "azan")          # empty by default
+os.makedirs(AZAN_DIR, exist_ok=True)
+AZAN_SETTINGS_FILE = os.path.join(data_dir(), "azan.json")
+AZAN_EXTS = (".mp3", ".wav", ".ogg")
+AZAN_PRAYERS = [(k, l) for k, l in PRAYER_ORDER if k in ALERT_KEYS]
+
+AZAN_CATALOG = {
+    "Dai Syazwan.mp3": "https://drive.google.com/uc?id=1jvEXGaagRhTx0_vCnJLSLPDd-KBajbaR",
+    "Ustaz Asri.mp3": "https://drive.google.com/uc?id=1QF68X3WOwkzB2MDE1xhhjk9M-a2d3xHm",
+}
+
+AZAN_CATALOG_FAJR = {
+    "Fajr Syeikh Mansur Al-Zahrani.mp3": "https://drive.google.com/uc?id=17Y7Ju6W3z6Ur_WNGGkCwq93S1Wf5PLru",
+    "Fajr Mishary Rashid.mp3": "https://drive.google.com/uc?id=1G2naFBKl3HYvefj1YSUmBciFxzSBTfrY"
+}
+
+def load_azan_settings():
+    cfg = {"enabled": False,
+           "prayers": {k: True for k, _ in AZAN_PRAYERS},
+           "file": "",
+           "file_fajr": ""}
+    try:
+        with open(AZAN_SETTINGS_FILE) as f:
+            saved = json.load(f)
+        cfg["enabled"] = bool(saved.get("enabled", False))
+        cfg["file"] = saved.get("file", "")
+        cfg["file_fajr"] = saved.get("file_fajr", "")
+        cfg["prayers"].update(saved.get("prayers", {}))
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return cfg
+
+
+def save_azan_settings(cfg):
+    with open(AZAN_SETTINGS_FILE, "w") as f:
+        json.dump(cfg, f)
+
+
+def ensure_azan(filename):
+    """Returns the local path, downloading the file first if it isn't on disk."""
+    path = os.path.join(AZAN_DIR, filename)
+    if os.path.exists(path):
+        return path
+    url = {**AZAN_CATALOG, **AZAN_CATALOG_FAJR}.get(filename)
+    if not url:
+        raise FileNotFoundError(filename)
+    r = requests.get(url, timeout=30, stream=True)
+    r.raise_for_status()
+    tmp = path + ".part"
+    with open(tmp, "wb") as f:
+        for chunk in r.iter_content(65536):
+            f.write(chunk)
+    os.replace(tmp, path)   # so a half-finished download is never mistaken for a real file
+    return path
 
 CACHE_FILE = os.path.join(data_dir(), "cache_zon.dat")
 SELECTION_FILE = os.path.join(data_dir(), "current.dat")
@@ -154,9 +209,26 @@ class settings(QtCore.QObject):
         self.zon_dropdown = QtWidgets.QComboBox(parent=Form)
         self.zon_dropdown.setObjectName("zon_dropdown")
         self.verticalLayout.addWidget(self.zon_dropdown)
-        self.zon_dropdown = QtWidgets.QComboBox(parent=Form)
-        self.zon_dropdown.setObjectName("zon_dropdown")
-        self.verticalLayout.addWidget(self.zon_dropdown)
+        self.azan_enable = QtWidgets.QCheckBox(parent=Form)
+        self.azan_enable.setObjectName("azan_enable")
+        self.verticalLayout.addWidget(self.azan_enable)
+        self.prayer_row = QtWidgets.QHBoxLayout()
+        self.prayer_checks = {}
+        for key, label in AZAN_PRAYERS:
+            cb = QtWidgets.QCheckBox(label, parent=Form)
+            self.prayer_checks[key] = cb
+            self.prayer_row.addWidget(cb)
+        self.verticalLayout.addLayout(self.prayer_row)
+        self.azan_label = QtWidgets.QLabel(parent=Form)
+        self.verticalLayout.addWidget(self.azan_label)
+        self.azan_dropdown = QtWidgets.QComboBox(parent=Form)
+        self.azan_dropdown.setObjectName("azan_dropdown")
+        self.verticalLayout.addWidget(self.azan_dropdown)
+        self.azan_fajr_label = QtWidgets.QLabel(parent=Form)
+        self.verticalLayout.addWidget(self.azan_fajr_label)
+        self.azan_fajr_dropdown = QtWidgets.QComboBox(parent=Form)
+        self.azan_fajr_dropdown.setObjectName("azan_fajr_dropdown")
+        self.verticalLayout.addWidget(self.azan_fajr_dropdown)
         self.horizontalLayout = QtWidgets.QHBoxLayout()
         self.horizontalLayout.setObjectName("horizontalLayout")
         self.saveButton = QtWidgets.QPushButton(parent=Form)
@@ -177,6 +249,14 @@ class settings(QtCore.QObject):
         for i, (code, _) in enumerate(self.zones):
             if code == zone:
                 self.zon_dropdown.setCurrentIndex(i)
+        cfg = load_azan_settings()
+        self.azan_enable.setChecked(cfg["enabled"])
+        for key, cb in self.prayer_checks.items():
+            cb.setChecked(cfg["prayers"].get(key, True))
+        self.populate_azan_files(self.azan_dropdown, AZAN_CATALOG, cfg["file"])
+        self.populate_azan_files(self.azan_fajr_dropdown, AZAN_CATALOG_FAJR, cfg["file_fajr"])
+        self.azan_enable.toggled.connect(self.toggle_azan_controls)
+        self.toggle_azan_controls(cfg["enabled"])
         self.country_dropdown.currentIndexChanged.connect(self.populate_zones)
         self.saveButton.clicked.connect(self.saveSettings)
         self.cancelButton.clicked.connect(self.exitSettings)
@@ -189,7 +269,10 @@ class settings(QtCore.QObject):
         self.label.setText(_translate("Form", "Zon Waktu Solat"))
         self.saveButton.setText(_translate("Form", "Simpan"))
         self.cancelButton.setText(_translate("Form", "Keluar"))
-    
+        self.azan_enable.setText(_translate("Form", "Aktifkan panggilan azan"))
+        self.azan_label.setText(_translate("Form", "Azan"))
+        self.azan_fajr_label.setText(_translate("Form", "Azan Subuh"))
+
     def populate_zones(self):
         code = COUNTRIES[self.country_dropdown.currentText()]
         if code == "AU":
@@ -199,7 +282,48 @@ class settings(QtCore.QObject):
         self.zon_dropdown.clear()
         self.zon_dropdown.addItems([desc for _, desc in self.zones])
 
+    def toggle_azan_controls(self, enabled):
+        for cb in self.prayer_checks.values():
+            cb.setEnabled(enabled)
+        for w in (self.azan_label, self.azan_dropdown,
+                  self.azan_fajr_label, self.azan_fajr_dropdown):
+            w.setEnabled(enabled)
+
+    def populate_azan_files(self, combo, catalog, selected=""):
+        local = {f for f in os.listdir(AZAN_DIR) if f.lower().endswith(AZAN_EXTS)}
+        combo.clear()
+        for name in sorted(local | set(catalog)):
+            text = name if name in local else f"{name} (dimuat turun semasa simpan)"
+            combo.addItem(text, name)
+        idx = combo.findData(selected)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+
     def saveSettings(self):
+        enabled = self.azan_enable.isChecked()
+        filename = self.azan_dropdown.currentData() or ""
+        filename_fajr = self.azan_fajr_dropdown.currentData() or ""
+
+        if enabled:
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+            try:
+                for fn in (filename, filename_fajr):
+                    if fn:
+                        ensure_azan(fn)
+            except (requests.exceptions.RequestException, OSError) as e:
+                QtWidgets.QApplication.restoreOverrideCursor()
+                QtWidgets.QMessageBox.warning(
+                    self.Form, "Warning", f"Gagal memuat turun fail azan:\n{e}")
+                return
+            QtWidgets.QApplication.restoreOverrideCursor()
+
+        save_azan_settings({
+            "enabled": enabled,
+            "prayers": {k: cb.isChecked() for k, cb in self.prayer_checks.items()},
+            "file": filename,
+            "file_fajr": filename_fajr,
+        })
+
         country = COUNTRIES[self.country_dropdown.currentText()]
         zone = self.zones[self.zon_dropdown.currentIndex()][0]
         save_selection(country, zone)
@@ -447,6 +571,9 @@ class Ui_MainWindow(object):
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_time)
         self.timer.start(1000) # Update every 1000 ms (1 second)
+        self.audio_output = QAudioOutput()
+        self.player = QMediaPlayer()
+        self.player.setAudioOutput(self.audio_output)
         self.update_date()
 
         msg = ''
@@ -507,10 +634,11 @@ class Ui_MainWindow(object):
             marker = (self.current_date, key)
             if key in ALERT_KEYS and marker not in self.notified and t <= now < t + ALERT_WINDOW:
                 self.notified.add(marker)
+                self.play_azan(key)
                 if self.tray:
                     self.tray.showMessage(
                         "Waktu Solat",
-                        f"Masuk waktu {label} ({t.strftime('%H:%M')})",
+                        f"Masuk waktu {label} bagi kawasan {self.current_zone} ({t.strftime('%H:%M')})",
                         QtWidgets.QSystemTrayIcon.MessageIcon.Information,
                         10000)
                 self.notified = {m for m in self.notified if m[0] >= self.current_date}
@@ -586,6 +714,21 @@ class Ui_MainWindow(object):
         self.main_window.confirm_quit = True
         QtWidgets.QApplication.quit()
 
+    def play_azan(self, key):
+        cfg = load_azan_settings()
+        if not cfg["enabled"] or not cfg["prayers"].get(key):
+            return False
+        filename = (cfg["file_fajr"] or cfg["file"]) if key == "fajr" else cfg["file"]
+        if not filename:
+            return False
+        path = os.path.join(AZAN_DIR, filename)
+        if not os.path.exists(path):
+            return False
+        self.player.setSource(QUrl.fromLocalFile(path))
+        self.audio_output.setVolume(1.0)
+        self.player.play()
+        return True
+    
 class AppWindow(QtWidgets.QMainWindow):
 
     confirm_quit = False
@@ -610,6 +753,7 @@ if __name__ == "__main__":
         icon = app.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_ComputerIcon)
     MainWindow.setWindowIcon(icon)
     tray = QtWidgets.QSystemTrayIcon(icon, MainWindow)
+    tray.messageClicked.connect(ui.player.stop)
     ui.tray = tray
     tray.setToolTip("Lanx's Waktu Solat")
 
@@ -624,6 +768,8 @@ if __name__ == "__main__":
     show_action.triggered.connect(show_window)
     quit_action = tray_menu.addAction("Quit")
     quit_action.triggered.connect(ui.quitApp)
+    stop_action = tray_menu.addAction("Stop azan")
+    stop_action.triggered.connect(ui.player.stop)
     tray.setContextMenu(tray_menu)
     tray.activated.connect(
         lambda reason: show_window()
