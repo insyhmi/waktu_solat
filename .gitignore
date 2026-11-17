@@ -3,3 +3,7 @@ current.dat
 dist/
 build/
 uv.lock
+build/WaktuSolat/Analysis-00.toc
+build/WaktuSolat/base_library.zip
+build/WaktuSolat/WaktuSolat.exe
+build/WaktuSolat/WaktuSolat.pkg

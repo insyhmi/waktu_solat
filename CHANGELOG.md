@@ -70,3 +70,8 @@ Project Waktu Solat is created
 
 ### Fixed
 - Removed ghost dropdown
+
+## 1.6.1 2026-11-17
+### Changed
+- Fixed first entry of Azan sound appear in both dropdowns
+- Fixed default output device not change when new output is connected. 

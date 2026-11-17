@@ -1,7 +1,7 @@
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import QTimer, QTime, QDate, QUrl
 from zoneinfo import ZoneInfo
-from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput, QMediaDevices
 import requests
 import datetime
 import os
@@ -109,7 +109,7 @@ def ensure_azan(filename):
     with open(tmp, "wb") as f:
         for chunk in r.iter_content(65536):
             f.write(chunk)
-    os.replace(tmp, path)   # so a half-finished download is never mistaken for a real file
+    os.replace(tmp, path)
     return path
 
 CACHE_FILE = os.path.join(data_dir(), "cache_zon.dat")
@@ -291,8 +291,10 @@ class settings(QtCore.QObject):
 
     def populate_azan_files(self, combo, catalog, selected=""):
         local = {f for f in os.listdir(AZAN_DIR) if f.lower().endswith(AZAN_EXTS)}
+        known = set(AZAN_CATALOG) | set(AZAN_CATALOG_FAJR)
+        extras = local - known                  # user-added files only
         combo.clear()
-        for name in sorted(local | set(catalog)):
+        for name in sorted(set(catalog) | extras):
             text = name if name in local else f"{name} (dimuat turun semasa simpan)"
             combo.addItem(text, name)
         idx = combo.findData(selected)
@@ -574,6 +576,8 @@ class Ui_MainWindow(object):
         self.audio_output = QAudioOutput()
         self.player = QMediaPlayer()
         self.player.setAudioOutput(self.audio_output)
+        self.media_devices = QMediaDevices(MainWindow)
+        self.media_devices.audioOutputsChanged.connect(self.on_audio_device_change)
         self.update_date()
 
         msg = ''
@@ -649,6 +653,11 @@ class Ui_MainWindow(object):
                     self.next_retry = now + RETRY_DELAY   # retry in a minute, not every second
                 else:
                     self.next_retry = None
+
+    def on_audio_device_change(self):
+        new_default = QMediaDevices.defaultAudioOutput()
+        if self.audio_output.device() != new_default:
+            self.audio_output.setDevice(new_default)
 
     def update_date(self):
         current_date = QDate.currentDate()

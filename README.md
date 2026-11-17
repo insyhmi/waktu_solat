@@ -22,7 +22,7 @@ Waktu Solat was once a sandbox file to learn and experiment with PyQt6 features 
 
 ## Usage
 
-Download ```.exe``` here -> [LanxWaktuSolat.exe](https://1drv.ms/u/c/429aeee96853109f/IQA5xJUnXZwiQ6XCoI1W98JFARfx61yFVeddHh73syMQ6-o?e=S3WfXl)
+Download ```.exe``` here -> [LanxWaktuSolat.exe](https://1drv.ms/f/c/429aeee96853109f/IgAUMZqWPjuuQYzXs-1R83iwAStLtw0VGU0-ExEFSuZ_3ZI?e=pxOCCC)
 
 or
 
